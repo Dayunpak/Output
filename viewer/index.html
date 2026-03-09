@@ -1,0 +1,415 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>NIfTI 3-Plane Viewer</title>
+  <script src="https://cdn.jsdelivr.net/npm/@niivue/niivue@0.47.0/dist/niivue.umd.min.js"></script>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans:wght@300;400;600&display=swap');
+
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg: #0a0c10;
+      --panel: #111418;
+      --border: #1e2530;
+      --accent: #00d4ff;
+      --accent2: #ff6b35;
+      --text: #c8d6e5;
+      --text-dim: #4a5568;
+      --success: #00e676;
+    }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: 'IBM Plex Sans', sans-serif;
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+
+    /* ── Header ── */
+    header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 10px 20px;
+      background: var(--panel);
+      border-bottom: 1px solid var(--border);
+      flex-shrink: 0;
+      gap: 16px;
+    }
+
+    .logo {
+      font-family: 'IBM Plex Mono', monospace;
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--accent);
+      letter-spacing: 0.1em;
+      white-space: nowrap;
+    }
+    .logo span { color: var(--text-dim); font-weight: 400; }
+
+    .controls {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+
+    /* Upload button */
+    .btn-upload {
+      position: relative;
+      cursor: pointer;
+    }
+    .btn-upload input[type="file"] {
+      position: absolute; inset: 0; opacity: 0; cursor: pointer; width: 100%;
+    }
+    .btn-upload label {
+      display: flex; align-items: center; gap: 6px;
+      padding: 6px 14px;
+      background: var(--accent);
+      color: #000;
+      font-family: 'IBM Plex Mono', monospace;
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: 0.08em;
+      border-radius: 3px;
+      cursor: pointer;
+      white-space: nowrap;
+      transition: opacity 0.2s;
+    }
+    .btn-upload:hover label { opacity: 0.85; }
+
+    /* URL input */
+    .url-group {
+      display: flex; gap: 6px; align-items: center;
+    }
+    .url-input {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      color: var(--text);
+      font-family: 'IBM Plex Mono', monospace;
+      font-size: 11px;
+      padding: 6px 10px;
+      border-radius: 3px;
+      width: 260px;
+      outline: none;
+      transition: border-color 0.2s;
+    }
+    .url-input:focus { border-color: var(--accent); }
+    .url-input::placeholder { color: var(--text-dim); }
+
+    .btn {
+      padding: 6px 12px;
+      background: transparent;
+      border: 1px solid var(--border);
+      color: var(--text);
+      font-family: 'IBM Plex Mono', monospace;
+      font-size: 11px;
+      border-radius: 3px;
+      cursor: pointer;
+      white-space: nowrap;
+      transition: border-color 0.2s, color 0.2s;
+    }
+    .btn:hover { border-color: var(--accent); color: var(--accent); }
+    .btn.active { border-color: var(--accent2); color: var(--accent2); }
+
+    /* Sliders */
+    .slider-group {
+      display: flex; align-items: center; gap: 6px;
+    }
+    .slider-label {
+      font-family: 'IBM Plex Mono', monospace;
+      font-size: 10px;
+      color: var(--text-dim);
+      white-space: nowrap;
+    }
+    input[type="range"] {
+      -webkit-appearance: none;
+      width: 80px; height: 3px;
+      background: var(--border);
+      border-radius: 2px;
+      outline: none;
+      cursor: pointer;
+    }
+    input[type="range"]::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      width: 12px; height: 12px;
+      border-radius: 50%;
+      background: var(--accent);
+      cursor: pointer;
+    }
+
+    /* Status bar */
+    .status {
+      font-family: 'IBM Plex Mono', monospace;
+      font-size: 10px;
+      color: var(--text-dim);
+      white-space: nowrap;
+    }
+    .status.ok { color: var(--success); }
+
+    /* ── Plane labels ── */
+    .canvas-wrapper {
+      flex: 1;
+      position: relative;
+      overflow: hidden;
+    }
+
+    canvas#gl {
+      width: 100%;
+      height: 100%;
+      display: block;
+    }
+
+    .plane-labels {
+      position: absolute;
+      top: 0; left: 0; right: 0; bottom: 0;
+      pointer-events: none;
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      grid-template-rows: 1fr 1fr;
+    }
+    .plane-label {
+      font-family: 'IBM Plex Mono', monospace;
+      font-size: 10px;
+      font-weight: 600;
+      letter-spacing: 0.12em;
+      padding: 8px 10px;
+      opacity: 0.5;
+    }
+    .plane-label.ax  { color: var(--accent);  }
+    .plane-label.sag { color: var(--accent2); }
+    .plane-label.cor { color: var(--success); }
+    .plane-label.th  { color: var(--text-dim); }
+
+    /* ── Drop overlay ── */
+    #drop-overlay {
+      display: none;
+      position: fixed; inset: 0;
+      background: rgba(0,212,255,0.07);
+      border: 2px dashed var(--accent);
+      z-index: 100;
+      align-items: center;
+      justify-content: center;
+      font-family: 'IBM Plex Mono', monospace;
+      font-size: 18px;
+      color: var(--accent);
+      letter-spacing: 0.1em;
+    }
+    #drop-overlay.active { display: flex; }
+
+    /* ── Empty state ── */
+    #empty-state {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 16px;
+      pointer-events: none;
+    }
+    .empty-icon {
+      width: 64px; height: 64px;
+      border: 2px solid var(--border);
+      border-radius: 8px;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 28px;
+      color: var(--text-dim);
+    }
+    .empty-title {
+      font-family: 'IBM Plex Mono', monospace;
+      font-size: 13px;
+      color: var(--text-dim);
+      letter-spacing: 0.08em;
+    }
+    .empty-sub {
+      font-size: 11px;
+      color: var(--text-dim);
+      opacity: 0.6;
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Header -->
+  <header>
+    <div class="logo">NIfTI<span>/</span>3P<span> · </span>Viewer</div>
+
+    <div class="controls">
+
+      <!-- File upload -->
+      <div class="btn-upload">
+        <input type="file" id="fileInput" accept=".nii,.nii.gz,.gz">
+        <label for="fileInput">📂 파일 열기 (.nii / .nii.gz)</label>
+      </div>
+
+      <!-- URL load -->
+      <div class="url-group">
+        <input class="url-input" id="urlInput" type="text" placeholder="또는 URL 입력 (https://…nii.gz)">
+        <button class="btn" onclick="loadFromURL()">Load</button>
+      </div>
+
+      <!-- Demo -->
+      <button class="btn" onclick="loadDemo()">Demo Brain</button>
+
+      <!-- Colormap -->
+      <button class="btn" id="cmapBtn" onclick="toggleColormap()">🎨 Gray</button>
+
+      <!-- Opacity -->
+      <div class="slider-group">
+        <span class="slider-label">Opacity</span>
+        <input type="range" id="opacitySlider" min="0" max="1" step="0.05" value="1"
+               oninput="setOpacity(this.value)">
+      </div>
+
+      <!-- Status -->
+      <span class="status" id="status">준비됨</span>
+    </div>
+  </header>
+
+  <!-- Canvas area -->
+  <div class="canvas-wrapper" id="canvasWrapper">
+    <canvas id="gl"></canvas>
+
+    <!-- Plane labels -->
+    <div class="plane-labels">
+      <div class="plane-label ax">AXIAL</div>
+      <div class="plane-label sag">SAGITTAL</div>
+      <div class="plane-label cor">CORONAL</div>
+      <div class="plane-label th">3D</div>
+    </div>
+
+    <!-- Empty state -->
+    <div id="empty-state">
+      <div class="empty-icon">🧠</div>
+      <div class="empty-title">NIfTI 파일을 드래그하거나 업로드하세요</div>
+      <div class="empty-sub">.nii · .nii.gz 지원 · Demo Brain으로 먼저 테스트 가능</div>
+    </div>
+  </div>
+
+  <!-- Drag-drop overlay -->
+  <div id="drop-overlay">드래그하여 파일 열기</div>
+
+<script>
+  // ── Init NiiVue ──────────────────────────────────────────
+  const nv = new niivue.Niivue({
+    backColor: [0.04, 0.05, 0.06, 1],
+    crosshairColor: [0, 0.83, 1, 0.7],
+    crosshairWidth: 1,
+    show3Dcrosshair: true,
+    isOrientCube: true,
+  });
+
+  nv.attachToCanvas(document.getElementById('gl'));
+  nv.setSliceType(nv.sliceTypeMultiplanar);
+
+  // ── Colormap toggle ──────────────────────────────────────
+  const cmaps = ['gray', 'hot', 'cool', 'bone', 'plasma'];
+  let cmapIdx = 0;
+
+  function toggleColormap() {
+    cmapIdx = (cmapIdx + 1) % cmaps.length;
+    const c = cmaps[cmapIdx];
+    if (nv.volumes.length > 0) {
+      nv.setColormap(nv.volumes[0].id, c);
+    }
+    document.getElementById('cmapBtn').textContent = '🎨 ' + c.charAt(0).toUpperCase() + c.slice(1);
+  }
+
+  // ── Opacity ──────────────────────────────────────────────
+  function setOpacity(val) {
+    if (nv.volumes.length > 0) {
+      nv.setOpacity(0, parseFloat(val));
+    }
+  }
+
+  // ── File input ───────────────────────────────────────────
+  document.getElementById('fileInput').addEventListener('change', async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    setStatus('로딩 중…', false);
+    hideEmpty();
+    try {
+      await nv.loadVolumes([{ url: URL.createObjectURL(file), name: file.name }]);
+      setStatus('✓ ' + file.name, true);
+    } catch(err) {
+      setStatus('오류: ' + err.message, false);
+    }
+  });
+
+  // ── URL load ─────────────────────────────────────────────
+  async function loadFromURL() {
+    const url = document.getElementById('urlInput').value.trim();
+    if (!url) return;
+    setStatus('로딩 중…', false);
+    hideEmpty();
+    try {
+      await nv.loadVolumes([{ url }]);
+      setStatus('✓ URL 로드 완료', true);
+    } catch(err) {
+      setStatus('오류: ' + err.message, false);
+    }
+  }
+
+  // ── Demo brain ───────────────────────────────────────────
+  async function loadDemo() {
+    setStatus('Demo 로딩 중…', false);
+    hideEmpty();
+    try {
+      await nv.loadVolumes([{
+        url: 'https://niivue.github.io/niivue/tests/images/mni152.nii.gz',
+        colormap: 'gray',
+      }]);
+      setStatus('✓ Demo Brain 로드 완료', true);
+    } catch(err) {
+      setStatus('오류: ' + err.message, false);
+    }
+  }
+
+  // ── Drag & drop ──────────────────────────────────────────
+  const overlay = document.getElementById('drop-overlay');
+  const wrapper = document.getElementById('canvasWrapper');
+
+  wrapper.addEventListener('dragover', (e) => { e.preventDefault(); overlay.classList.add('active'); });
+  wrapper.addEventListener('dragleave', () => overlay.classList.remove('active'));
+  wrapper.addEventListener('drop', async (e) => {
+    e.preventDefault();
+    overlay.classList.remove('active');
+    const file = e.dataTransfer.files[0];
+    if (!file) return;
+    setStatus('로딩 중…', false);
+    hideEmpty();
+    try {
+      await nv.loadVolumes([{ url: URL.createObjectURL(file), name: file.name }]);
+      setStatus('✓ ' + file.name, true);
+    } catch(err) {
+      setStatus('오류: ' + err.message, false);
+    }
+  });
+
+  // ── Helpers ──────────────────────────────────────────────
+  function setStatus(msg, ok) {
+    const el = document.getElementById('status');
+    el.textContent = msg;
+    el.className = 'status' + (ok ? ' ok' : '');
+  }
+
+  function hideEmpty() {
+    document.getElementById('empty-state').style.display = 'none';
+  }
+
+  // URL 파라미터로 자동 로드 (?file=https://…)
+  const params = new URLSearchParams(location.search);
+  if (params.get('file')) {
+    document.getElementById('urlInput').value = params.get('file');
+    loadFromURL();
+  }
+</script>
+</body>
+</html>
